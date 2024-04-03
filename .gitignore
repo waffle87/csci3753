@@ -1,0 +1,9 @@
+*.pdf
+*.o
+*.ko
+*/.gdb_history
+pa2_file_tester/pa2test
+pa4_shared_array/shared_array
+pa5_dns_resolver/lookup
+pa6_threaded_resolver/multi-lookup
+pa7_lru/test*
