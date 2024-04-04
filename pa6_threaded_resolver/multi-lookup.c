@@ -4,7 +4,7 @@
 #include "multi-lookup.h"
 #include <sys/time.h>
 
-int main(int argc, char *argv[]) {
+int main(int argc, char **argv) {
   if (argc < 6) {
     fprintf(stderr,
             "usage: %s <# requester> <# resolver> <requester log> <resolver "
