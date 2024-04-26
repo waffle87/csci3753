@@ -2,179 +2,153 @@
 // CSCI3753 SP24
 // PA8 Predict
 #include "simulator.h"
+#include <limits.h>
 #include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
 
-#define LOWER_BOUND 0.00001
-#define UPPER_BOUND 0.5
+struct page_stat {
+  int page;
+  int freq;
+  int *timestamp;
+};
 
-int predict_prev(int proc, int page,
-                 int prev[MAXPROCESSES][MAXPROCPAGES][MAXPROCPAGES]) {
-  int prediction = -1, most_frequent = 0;
-  for (int i = 0; i < MAXPROCPAGES; i++)
-    if (prev[proc][page][i] > most_frequent) {
-      most_frequent = prev[proc][page][i];
-      prediction = i;
-    }
-  return prediction;
+int active_page(int pc) { return pc / PAGESIZE; }
+
+struct page_stat *
+predict_page(int proc, int cur_pc,
+             struct page_stat cfg[MAXPROCESSES][MAXPROCPAGES][MAXPROCPAGES]) {
+  return cfg[proc][active_page(cur_pc + 101)];
 }
 
-#pragma GCC push_options
-#pragma GCC optimize("-O3")
+int page_count(struct page_stat *guesses) {
+  int n = 0;
+  while (guesses[n].page != -1 && n < MAXPROCPAGES)
+    n++;
+  return n;
+}
+
+void swap(struct page_stat *x, struct page_stat *y) {
+  struct page_stat z = *x;
+  *x = *y;
+  *y = z;
+}
+
+void page_sort(struct page_stat *guesses) {
+  int n = page_count(guesses);
+  int swapped = 0;
+  do {
+    swapped = 0;
+    for (int i = 1; i < n; i++)
+      if (guesses[i - 1].freq < guesses[i].freq) {
+        swap(guesses + (i - 1), guesses + i);
+        swapped = 1;
+      }
+  } while (swapped);
+}
+
+bool find_lru_page(int time_stamps[MAXPROCESSES][MAXPROCPAGES],
+                   Pentry q[MAXPROCESSES], int proc, int *lru_page) {
+  int smallest_tick = INT_MAX;
+  bool res = true;
+  for (int i = 0; i < MAXPROCPAGES; i++)
+    if (q[proc].pages[i] == 1 && time_stamps[proc][i] < smallest_tick) {
+      *lru_page = i;
+      smallest_tick = time_stamps[proc][i];
+      res = false;
+    }
+  return res;
+}
+
+void insert_cfg(int curr_page, int proc, int prev_page,
+                struct page_stat cfg[MAXPROCESSES][MAXPROCPAGES][MAXPROCPAGES],
+                int time_stamps[MAXPROCESSES][MAXPROCPAGES]) {
+  struct page_stat *new = cfg[proc][prev_page];
+  for (int i = 0; i < MAXPROCPAGES; i++) {
+    if (new[i].page == curr_page) {
+      new[i].freq++;
+      break;
+    }
+    if (new[i].page == -1) {
+      new[i].page = curr_page;
+      new[i].freq = 1;
+      new[i].timestamp = &(time_stamps[proc][i]);
+      break;
+    }
+  }
+}
 
 void pageit(Pentry q[MAXPROCESSES]) {
-  static bool initialised = false;
-  static double fault_freq[MAXPROCESSES];
-  static int tick = 1, timestamps[MAXPROCESSES][MAXPROCPAGES],
-             prev[MAXPROCESSES][MAXPROCPAGES][MAXPROCPAGES],
-             allocate[MAXPROCESSES], frame_cnt[MAXPROCESSES],
-             fault_cnt[MAXPROCESSES], hit_cnt[MAXPROCESSES],
-             prev_pc[MAXPROCESSES][MAXPROCPAGES],
-             curr_pc[MAXPROCESSES][MAXPROCPAGES],
-             prev_status[MAXPROCESSES][MAXPROCPAGES][MAXPROCPAGES] = {{{0}}};
-  int proc, pc, page, proc_running = 0, running[MAXPROCESSES], flag = 1,
-                      total_pages = 0, total_allocated = 0;
-
-  if (!initialised) {
-    for (int i = 0; i < MAXPROCESSES; i++) {
-      fault_freq[i] = 0;
-      allocate[i] = 5;
-      frame_cnt[i] = 0;
-      fault_cnt[i] = 0;
-      hit_cnt[i] = 0;
-      for (int j = 0; j < MAXPROCPAGES; j++) {
-        timestamps[i][j] = 0;
-        prev_pc[i][j] = 0;
-        curr_pc[i][j] = 0;
-        for (int k = 0; k < MAXPROCPAGES; k++)
-          prev[i][j][k] = 0;
-      }
+  static bool initialized = false;
+  static int tick = 1, time_stamps[MAXPROCESSES][MAXPROCPAGES],
+             proc_stat[MAXPROCESSES], pc_prev[MAXPROCESSES];
+  static struct page_stat cfg[MAXPROCESSES][MAXPROCPAGES][MAXPROCPAGES];
+  int proc_tmp, page_tmp, lru_page, prev_page, curr_page;
+  if (!initialized) {
+    for (int i = 0; i < MAXPROCESSES; i++)
+      for (int j = 0; j < MAXPROCESSES; j++)
+        for (int k = 0; k < MAXPROCESSES; k++) {
+          cfg[i][j][k].page = -1;
+          cfg[i][j][k].freq = -1;
+          cfg[i][j][k].timestamp = NULL;
+        }
+    for (proc_tmp = 0; proc_tmp < MAXPROCESSES; proc_tmp++) {
+      for (page_tmp = 0; page_tmp < MAXPROCPAGES; page_tmp++)
+        time_stamps[proc_tmp][page_tmp] = 0;
+      proc_stat[proc_tmp] = 0;
     }
-    initialised = true;
+    initialized = true;
   }
-
-  for (int i = 0; i < MAXPROCESSES; i++)
-    if (q[i].active) {
-      running[proc_running] = i;
-      proc_running++;
-    } else {
-      allocate[i] = 0;
-      for (int j = 0; j < MAXPROCPAGES; j++)
-        if (q[i].pages[j])
-          pageout(i, j);
-    }
-
-  if (!proc_running)
-    return;
-  if (proc_running <= 7)
-    flag = 0;
-  for (int i = 0; i < proc_running; i++) {
-    proc = running[i];
-    pc = q[proc].pc;
-    page = pc / PAGESIZE;
-    if (!curr_pc[proc][page]) {
-      prev_pc[proc][page] = pc;
-      curr_pc[proc][page] = 1;
-      for (int j = 0; j < MAXPROCPAGES; j++)
-        prev_status[proc][page][j] = q[proc].pages[page] ? 1 : 0;
-    }
-    for (int i = 0; i < MAXPROCPAGES; i++)
-      if (curr_pc[proc][i] && pc >= prev_pc[proc][i] + 170) {
-        curr_pc[proc][i] = 0;
-        prev[proc][i][page]++;
-        if (pc == prev_pc[proc][i] + 170)
-          prev[proc][i][page]++;
-        for (int j = 0; j < MAXPROCPAGES; j++) {
-          if (prev_status[proc][i][j] && !q[proc].pages[j] && j != page)
-            prev[proc][i][j]--;
-          if (pc == prev_pc[proc][i] + 170)
-            prev[proc][i][j]--;
-        }
-      }
-    for (int i = 0; i < MAXPROCPAGES; i++)
-      timestamps[proc][i]++;
-    timestamps[proc][page] = 0;
-    if (flag) {
-      for (int i = 0; i < MAXPROCESSES; i++) {
-        frame_cnt[i] = 0;
-        for (int j = 0; j < MAXPROCPAGES; j++)
-          if (q[i].pages[j])
-            frame_cnt[i]++;
-        total_pages += frame_cnt[i];
-        total_allocated += allocate[i];
-      }
-      for (int i = 0; i < MAXPROCESSES; i++)
-        if (fault_freq[i] < LOWER_BOUND)
-          if (frame_cnt[i] < allocate[i] && allocate[i] >= 5) {
-            allocate[i]--;
-            total_allocated--;
-          }
-
-      if (total_allocated < PHYSICALPAGES) {
-        int i = 0;
-        while (total_allocated < PHYSICALPAGES && i < MAXPROCESSES) {
-          if (fault_freq[i] >= UPPER_BOUND && allocate[i] < 14) {
-            allocate[i]++;
-            total_allocated++;
-          } else if (fault_freq[i] > UPPER_BOUND / 2 && allocate[i] < 10) {
-            allocate[i]++;
-            total_allocated++;
-          } else if (allocate[i] < 8) {
-            allocate[i]++;
-            total_allocated++;
-          }
-          i++;
-        }
-      }
-    }
-    if (q[proc].pages[page]) {
-      hit_cnt[proc]++;
-      fault_freq[proc] = (double)fault_cnt[proc] / hit_cnt[proc];
+  for (proc_tmp = 0; proc_tmp < MAXPROCESSES; proc_tmp++) {
+    if (!q[proc_tmp].active)
       continue;
-    } else {
-      fault_cnt[proc]++;
-      fault_freq[proc] =
-          hit_cnt[proc] ? (double)fault_cnt[proc] / hit_cnt[proc] : UPPER_BOUND;
-      if (!flag && pagein(proc, page))
-        continue;
-      else if (flag && frame_cnt[proc] < allocate[proc] && pagein(proc, page))
-        continue;
-      else if (flag && total_pages < PHYSICALPAGES &&
-               total_allocated < PHYSICALPAGES && pagein(proc, page)) {
-        allocate[proc]++;
-        continue;
-      } else {
-        int evict_page = -1, lru = -10;
-        for (int i = 0; i < MAXPROCPAGES; i++)
-          if (q[proc].pages[i] && prev[proc][page][i] < lru && i != page) {
-            evict_page = i;
-            pageout(proc, evict_page);
-          }
-        if (evict_page == -1) {
-          for (int i = 0; i < MAXPROCPAGES; i++) {
-            if (!q[proc].pages[i])
-              continue;
-            if (timestamps[proc][i] > lru) {
-              lru = timestamps[proc][i];
-              evict_page = i;
-            }
-          }
-          pageout(proc, evict_page);
-        }
-      }
-    }
+    if (prev_page == -1)
+      continue;
+    prev_page = active_page(pc_prev[proc_tmp]);
+    pc_prev[proc_tmp] = q[proc_tmp].pc;
+    curr_page = active_page(q[proc_tmp].pc);
+    if (prev_page == curr_page)
+      continue;
+    pageout(proc_tmp, prev_page);
+    insert_cfg(curr_page, proc_tmp, prev_page, cfg, time_stamps);
   }
-  for (int i = 0; i < proc_running; i++) {
-    proc = running[i];
-    pc = q[proc].pc;
-    page = pc / PAGESIZE;
-    int page_predict = predict_prev(proc, page, prev);
-    if (page_predict == -1 || page_predict == page)
+  for (proc_tmp = 0; proc_tmp < MAXPROCESSES; proc_tmp++) {
+    if (!q[proc_tmp].active)
       continue;
-    if (q[proc].pages[page_predict])
+    page_tmp = (q[proc_tmp].pc - 1) / PAGESIZE;
+    time_stamps[proc_tmp][page_tmp] = tick;
+  }
+  for (proc_tmp = 0; proc_tmp < MAXPROCESSES; proc_tmp++) {
+    if (!q[proc_tmp].active) {
+      for (page_tmp = 0; page_tmp < MAXPROCPAGES; page_tmp++)
+        pageout(proc_tmp, page_tmp);
       continue;
-    pagein(proc, page_predict);
+    }
+    page_tmp = (q[proc_tmp].pc) / PAGESIZE;
+    if (q[proc_tmp].pages[page_tmp] == 1)
+      continue;
+    if (pagein(proc_tmp, page_tmp)) {
+      proc_stat[proc_tmp] = 0;
+      continue;
+    }
+    if (proc_stat[proc_tmp])
+      continue;
+    if (find_lru_page(time_stamps, q, proc_tmp, &lru_page))
+      continue;
+    if (!pageout(proc_tmp, lru_page)) {
+      fprintf(stderr, "error: failed to page out page %d\n", lru_page);
+      exit(EXIT_FAILURE);
+    }
+    proc_stat[proc_tmp] = 1;
+  }
+  for (proc_tmp = 0; proc_tmp < MAXPROCESSES; proc_tmp++) {
+    struct page_stat *predictions;
+    if (!q[proc_tmp].active)
+      continue;
+    predictions = predict_page(proc_tmp, q[proc_tmp].pc, cfg);
+    page_sort(predictions);
+    for (int i = 0; i < page_count(predictions); i++)
+      pagein(proc_tmp, predictions[i].page);
   }
   tick++;
 }
-
-#pragma GCC pop_options
