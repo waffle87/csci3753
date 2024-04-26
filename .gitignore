@@ -8,3 +8,4 @@ pa5_dns_resolver/lookup
 pa6_threaded_resolver/multi-lookup
 pa6_threaded_resolver/*.log
 pa7_lru/test*
+pa8_predict/test-predict
