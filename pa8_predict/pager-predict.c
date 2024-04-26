@@ -79,11 +79,10 @@ void insert_cfg(int curr_page, int proc, int prev_page,
 }
 
 void pageit(Pentry q[MAXPROCESSES]) {
-  static bool initialized = false;
-  static int tick = 1, time_stamps[MAXPROCESSES][MAXPROCPAGES],
-             proc_stat[MAXPROCESSES], pc_prev[MAXPROCESSES];
+  static bool initialized = false, proc_active[MAXPROCESSES];
   static struct page_stat cfg[MAXPROCESSES][MAXPROCPAGES][MAXPROCPAGES];
-  int proc_tmp, page_tmp, lru_page, prev_page, curr_page;
+  static int proc_tmp, page_tmp, lru_page, prev_page, curr_page,
+      tick = 1, time_stamps[MAXPROCESSES][MAXPROCPAGES], pc_prev[MAXPROCESSES];
   if (!initialized) {
     for (int i = 0; i < MAXPROCESSES; i++)
       for (int j = 0; j < MAXPROCESSES; j++)
@@ -95,14 +94,12 @@ void pageit(Pentry q[MAXPROCESSES]) {
     for (proc_tmp = 0; proc_tmp < MAXPROCESSES; proc_tmp++) {
       for (page_tmp = 0; page_tmp < MAXPROCPAGES; page_tmp++)
         time_stamps[proc_tmp][page_tmp] = 0;
-      proc_stat[proc_tmp] = 0;
+      proc_active[proc_tmp] = false;
     }
     initialized = true;
   }
   for (proc_tmp = 0; proc_tmp < MAXPROCESSES; proc_tmp++) {
     if (!q[proc_tmp].active)
-      continue;
-    if (prev_page == -1)
       continue;
     prev_page = active_page(pc_prev[proc_tmp]);
     pc_prev[proc_tmp] = q[proc_tmp].pc;
@@ -128,10 +125,10 @@ void pageit(Pentry q[MAXPROCESSES]) {
     if (q[proc_tmp].pages[page_tmp] == 1)
       continue;
     if (pagein(proc_tmp, page_tmp)) {
-      proc_stat[proc_tmp] = 0;
+      proc_active[proc_tmp] = false;
       continue;
     }
-    if (proc_stat[proc_tmp])
+    if (proc_active[proc_tmp])
       continue;
     if (find_lru_page(time_stamps, q, proc_tmp, &lru_page))
       continue;
@@ -139,7 +136,7 @@ void pageit(Pentry q[MAXPROCESSES]) {
       fprintf(stderr, "error: failed to page out page %d\n", lru_page);
       exit(EXIT_FAILURE);
     }
-    proc_stat[proc_tmp] = 1;
+    proc_active[proc_tmp] = true;
   }
   for (proc_tmp = 0; proc_tmp < MAXPROCESSES; proc_tmp++) {
     struct page_stat *predictions;
