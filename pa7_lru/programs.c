@@ -5,7 +5,7 @@
  *                  http://www.cs.tufts.edu/~couch/
  */
 
-#include "simulator.h"
+#include "../common/simulator.h"
 
 Program programs[PROGRAMS] = {
     {1535,

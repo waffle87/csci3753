@@ -4,6 +4,8 @@ CC = gcc
 CFLAGS = -c -g -Wall -Wextra
 LFLAGS = -g -Wall -Wextra
 
+VPATH += ../common
+
 SUBMITFILES = pager-lru.c
 
 .PHONY: all clean

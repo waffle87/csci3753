@@ -1,7 +1,7 @@
 // Jack Sangdahl
 // CSCI3753 SP24
 // PA8 Predict
-#include "simulator.h"
+#include "../common/simulator.h"
 #include <limits.h>
 #include <stdbool.h>
 #include <stdio.h>

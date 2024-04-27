@@ -1,7 +1,7 @@
 // Jack Sangdahl
 // CSCI3753 SP24
 // PA7 LRU
-#include "simulator.h"
+#include "../common/simulator.h"
 #include <stdbool.h>
 
 void pageit(Pentry q[MAXPROCESSES]) {

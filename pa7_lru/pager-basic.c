@@ -1,7 +1,7 @@
 // Very basic pageit algorithm, only allows one process at a time, and one page
 // in memory
 
-#include "simulator.h"
+#include "../common/simulator.h"
 
 void pageit(Pentry q[MAXPROCESSES]) {
   for (int proc = 0; proc < MAXPROCESSES; proc++) {
