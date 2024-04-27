@@ -16,9 +16,9 @@ struct page_stat {
 int active_page(int pc) { return pc / PAGESIZE; }
 
 struct page_stat *
-predict_page(int proc, int cur_pc,
-             struct page_stat cfg[MAXPROCESSES][MAXPROCPAGES][MAXPROCPAGES]) {
-  return cfg[proc][active_page(cur_pc + 101)];
+predict_page(int proc, int curr_pc,
+             struct page_stat data[MAXPROCESSES][MAXPROCPAGES][MAXPROCPAGES]) {
+  return data[proc][active_page(curr_pc + 101)];
 }
 
 int page_count(struct page_stat *guesses) {
@@ -36,13 +36,13 @@ void swap(struct page_stat *x, struct page_stat *y) {
 
 void page_sort(struct page_stat *guesses) {
   int n = page_count(guesses);
-  int swapped = 0;
+  bool swapped;
   do {
-    swapped = 0;
+    swapped = false;
     for (int i = 1; i < n; i++)
       if (guesses[i - 1].freq < guesses[i].freq) {
         swap(guesses + (i - 1), guesses + i);
-        swapped = 1;
+        swapped = true;
       }
   } while (swapped);
 }
@@ -60,10 +60,11 @@ bool find_lru_page(int time_stamps[MAXPROCESSES][MAXPROCPAGES],
   return res;
 }
 
-void insert_cfg(int curr_page, int proc, int prev_page,
-                struct page_stat cfg[MAXPROCESSES][MAXPROCPAGES][MAXPROCPAGES],
-                int time_stamps[MAXPROCESSES][MAXPROCPAGES]) {
-  struct page_stat *new = cfg[proc][prev_page];
+void update_page(
+    int curr_page, int proc, int prev_page,
+    struct page_stat data[MAXPROCESSES][MAXPROCPAGES][MAXPROCPAGES],
+    int time_stamps[MAXPROCESSES][MAXPROCPAGES]) {
+  struct page_stat *new = data[proc][prev_page];
   for (int i = 0; i < MAXPROCPAGES; i++) {
     if (new[i].page == curr_page) {
       new[i].freq++;
@@ -80,16 +81,16 @@ void insert_cfg(int curr_page, int proc, int prev_page,
 
 void pageit(Pentry q[MAXPROCESSES]) {
   static bool initialized = false, proc_active[MAXPROCESSES];
-  static struct page_stat cfg[MAXPROCESSES][MAXPROCPAGES][MAXPROCPAGES];
+  static struct page_stat data[MAXPROCESSES][MAXPROCPAGES][MAXPROCPAGES];
   static int proc_tmp, page_tmp, lru_page, prev_page, curr_page,
       tick = 1, time_stamps[MAXPROCESSES][MAXPROCPAGES], pc_prev[MAXPROCESSES];
   if (!initialized) {
     for (int i = 0; i < MAXPROCESSES; i++)
       for (int j = 0; j < MAXPROCESSES; j++)
         for (int k = 0; k < MAXPROCESSES; k++) {
-          cfg[i][j][k].page = -1;
-          cfg[i][j][k].freq = -1;
-          cfg[i][j][k].timestamp = NULL;
+          data[i][j][k].page = -1;
+          data[i][j][k].freq = -1;
+          data[i][j][k].timestamp = NULL;
         }
     for (proc_tmp = 0; proc_tmp < MAXPROCESSES; proc_tmp++) {
       for (page_tmp = 0; page_tmp < MAXPROCPAGES; page_tmp++)
@@ -107,7 +108,7 @@ void pageit(Pentry q[MAXPROCESSES]) {
     if (prev_page == curr_page)
       continue;
     pageout(proc_tmp, prev_page);
-    insert_cfg(curr_page, proc_tmp, prev_page, cfg, time_stamps);
+    update_page(curr_page, proc_tmp, prev_page, data, time_stamps);
   }
   for (proc_tmp = 0; proc_tmp < MAXPROCESSES; proc_tmp++) {
     if (!q[proc_tmp].active)
@@ -121,7 +122,7 @@ void pageit(Pentry q[MAXPROCESSES]) {
         pageout(proc_tmp, page_tmp);
       continue;
     }
-    page_tmp = (q[proc_tmp].pc) / PAGESIZE;
+    page_tmp = q[proc_tmp].pc / PAGESIZE;
     if (q[proc_tmp].pages[page_tmp] == 1)
       continue;
     if (pagein(proc_tmp, page_tmp)) {
@@ -142,7 +143,7 @@ void pageit(Pentry q[MAXPROCESSES]) {
     struct page_stat *predictions;
     if (!q[proc_tmp].active)
       continue;
-    predictions = predict_page(proc_tmp, q[proc_tmp].pc, cfg);
+    predictions = predict_page(proc_tmp, q[proc_tmp].pc, data);
     page_sort(predictions);
     for (int i = 0; i < page_count(predictions); i++)
       pagein(proc_tmp, predictions[i].page);
