@@ -116,7 +116,7 @@ void *request(void *data) {
         pthread_mutex_lock(req_data->req_log_lock);
         fprintf(req_data->req_log, "%s", line);
         pthread_mutex_unlock(req_data->req_log_lock);
-        queue_push(req_data->buffer, strndup(strtok(line, "\n"), strlen(line)));
+        queue_push(req_data->buffer, strdup(line));
         pthread_mutex_unlock(req_data->m);
         pthread_cond_signal(req_data->c_res);
       }
